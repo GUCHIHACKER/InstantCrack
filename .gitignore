@@ -1,0 +1,7 @@
+add_commit_push.sh
+db/*
+!db/.gitignore
+ingestor/src/*.o
+
+api/target
+api/api.db

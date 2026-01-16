@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InstantCrack // GUCHIHACKER</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #050505;
+            --terminal-bg: #0a0a0a;
+            --accent: #00ff41;
+            --accent-dim: rgba(0, 255, 65, 0.15);
+            --text: #00ff41;
+            --text-dim: #008f11;
+            --error: #ff3e3e;
+            --border: 1px solid #00ff41;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Fira Code', monospace;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            background-image: linear-gradient(rgba(0, 255, 65, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 65, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .terminal {
+            width: 100%;
+            max-width: 800px;
+            background: var(--terminal-bg);
+            border: var(--border);
+            padding: 2.5rem;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 1);
+            position: relative;
+        }
+
+        .terminal::before {
+            content: "INSTANTCRACK_QUERY_INTERFACE";
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--bg);
+            padding: 0 10px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        header {
+            margin-bottom: 2.5rem;
+            border-bottom: 1px solid var(--text-dim);
+            padding-bottom: 1rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .form-group {
+            margin-bottom: 2rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+
+        select,
+        input {
+            width: 100%;
+            background: #000;
+            border: 1px solid var(--text-dim);
+            padding: 1.2rem;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        select:focus,
+        input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 8px var(--accent-dim);
+        }
+
+        option {
+            background-color: #000;
+            color: var(--text);
+        }
+
+        button {
+            width: 100%;
+            background: transparent;
+            color: var(--accent);
+            border: var(--border);
+            padding: 1.2rem;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        button:hover {
+            background: var(--accent);
+            color: var(--bg);
+        }
+
+        #result {
+            margin-top: 2.5rem;
+            padding: 2rem;
+            border: 1px solid var(--accent);
+            display: none;
+            background: rgba(0, 255, 65, 0.02);
+        }
+
+        .result-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--text-dim);
+            padding-bottom: 0.5rem;
+            display: inline-block;
+        }
+
+        .result-value {
+            font-size: 1.4rem;
+            font-weight: 600;
+            word-break: break-all;
+            margin-top: 0.5rem;
+        }
+
+        .status-error {
+            color: var(--error);
+            border-color: var(--error) !important;
+        }
+
+        .status-success {
+            color: var(--accent);
+        }
+
+        footer {
+            margin-top: 2.5rem;
+            font-size: 0.75rem;
+            text-align: center;
+            color: var(--text-dim);
+            letter-spacing: 1px;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .prompt {
+            color: var(--accent);
+            margin-right: 12px;
+            font-weight: bold;
+        }
+
+        .loader {
+            display: none;
+            font-size: 0.9rem;
+            margin-top: 15px;
+            color: var(--text-dim);
+        }
+
+        @media (max-width: 600px) {
+            .terminal {
+                padding: 1.5rem;
+            }
+
+            h1 {
+                font-size: 1.4rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="terminal">
+        <header>
+            <h1>[ InstantCrack Dashboard ]</h1>
+            <p style="color: var(--text-dim); font-size: 0.8rem; margin-top: 5px;">Módulo de Consulta de Diccionarios
+                Distribuidos</p>
+        </header>
+
+        <main>
+            <div class="form-group">
+                <label for="algo">CONFIGURACION_ALGORITMO</label>
+                <select id="algo">
+                    <option value="" disabled selected>CARGANDO_RECURSOS...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="hash">HASH_STRING_INPUT</label>
+                <div style="display: flex; align-items: center;">
+                    <span class="prompt">>></span>
+                    <input type="text" id="hash" placeholder="Ingrese el hash para verificar..." autocomplete="off">
+                </div>
+            </div>
+
+            <button id="crackBtn">EJECUTAR_CONSULTA_BASE_DATOS</button>
+
+            <div id="loader" class="loader">ESTADO: PROCESANDO_PETICION_EN_LOTE...</div>
+
+            <div id="result">
+                <div class="result-label" id="resultLabel">DATOS_RECUPERADOS</div>
+                <div class="result-value" id="resultValue"></div>
+            </div>
+        </main>
+    </div>
+
+    <footer>
+        DESARROLLADO POR <a href="https://github.com/GUCHIHACKER" target="_blank">GUCHIHACKER</a> // 2026
+    </footer>
+
+    <script>
+        const algoSelect = document.getElementById('algo');
+        const hashInput = document.getElementById('hash');
+        const crackBtn = document.getElementById('crackBtn');
+        const resultDiv = document.getElementById('result');
+        const resultValue = document.getElementById('resultValue');
+        const resultLabel = document.getElementById('resultLabel');
+        const loader = document.getElementById('loader');
+
+        async function loadAlgos() {
+            try {
+                const res = await fetch('/algorithms');
+                const algos = await res.json();
+                algoSelect.innerHTML = algos.map(name => `<option value="${name}">${name.toUpperCase()}</option>`).join('');
+            } catch (err) {
+                algoSelect.innerHTML = '<option value="" disabled>ERROR_CONEXION_DB</option>';
+            }
+        }
+
+        async function performCrack() {
+            const algo = algoSelect.value;
+            const hash = hashInput.value.trim();
+
+            if (!hash) return;
+
+            crackBtn.style.display = 'none';
+            loader.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            try {
+                const res = await fetch(`/lookup/${algo}/${encodeURIComponent(hash)}`);
+                const data = await res.json();
+
+                resultDiv.style.display = 'block';
+                resultDiv.className = '';
+
+                if (data.error) {
+                    resultDiv.classList.add('status-error');
+                    resultLabel.innerText = 'ERROR_SISTEMA';
+                    resultValue.innerText = data.error;
+                } else if (data.plaintext) {
+                    resultDiv.classList.add('status-success');
+                    resultLabel.innerText = 'TEXTO_PLANO_RECUPERADO:';
+                    resultValue.innerText = data.plaintext;
+                } else {
+                    resultLabel.innerText = 'ESTADO_CONSULTA:';
+                    resultValue.innerText = 'SIN_COINCIDENCIAS_EN_EL_SET_DE_DATOS';
+                }
+            } catch (err) {
+                resultDiv.style.display = 'block';
+                resultDiv.classList.add('status-error');
+                resultLabel.innerText = 'ERROR_CONECTIVIDAD';
+                resultValue.innerText = 'FALLO AL ALCANZAR EL SERVIDOR DE CONSULTAS';
+            } finally {
+                crackBtn.style.display = 'block';
+                loader.style.display = 'none';
+            }
+        }
+
+        crackBtn.addEventListener('click', performCrack);
+        hashInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performCrack();
+        });
+
+        loadAlgos();
+    </script>
+</body>
+
+</html>
