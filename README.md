@@ -1,6 +1,6 @@
 # InstantCrack
 
-InstantCrack es un motor de recuperación de hashes de alto rendimiento diseñado para realizar búsquedas instantáneas en bases de datos precalculadas de gran escala. El sistema utiliza una arquitectura modular basada en C y Rust, optimizando el acceso a disco mediante el uso de LMDB (Lightning Memory-Mapped Database).
+InstantCrack es un motor de recuperación de hashes de alto rendimiento diseñado para realizar búsquedas instantáneas en bases de datos precalculadas de gran escala, pensado para ejecutarse en infraestructura local y mantener el control total sobre los datos. El sistema utiliza una arquitectura modular basada en C y Rust, optimizando el acceso a disco mediante el uso de LMDB (Lightning Memory‑Mapped Database), lo que permite trabajar con tablas y wordlists propias sin depender de servicios externos.
 
 ## Descripción del Proyecto
 
