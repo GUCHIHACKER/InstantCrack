@@ -47,7 +47,7 @@ lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs) {
 
     if (mdb_env_create(&ctx->env) != 0) goto fail;
     if (mdb_env_set_maxdbs(ctx->env, max_dbs) != 0) goto fail;
-    if (mdb_env_set_mapsize(ctx->env, 1ULL << 32) != 0) goto fail; // 4GB
+    if (mdb_env_set_mapsize(ctx->env, 1ULL << 40) != 0) goto fail; // 1TB
     if (mdb_env_open(ctx->env, ctx->path, 0, 0664) != 0) goto fail;
     
     // Iniciar primera transacción
