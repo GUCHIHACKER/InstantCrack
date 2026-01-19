@@ -77,7 +77,7 @@ make
 ### 3. Compilación del Ingestor
 Regrese al código fuente del ingestor y proceda con la compilación del binario principal:
 ```bash
-cd ../src
+cd ../
 make
 ```
 
