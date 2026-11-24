@@ -4,19 +4,67 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Lee un símbolo entero del módulo. Devuelve 0 si no existe.
+static int sym_int(void* handle, const char* name) {
+    const int* p = (const int*)dlsym(handle, name);
+    return p ? *p : 0;
+}
+
+// Valida las constantes del módulo e imprime el motivo si algo falla.
+static int validate(const char* path, const loaded_module_t* m) {
+    if (!m->name) {
+        fprintf(stderr, "Error: módulo %s no exporta MODULE_NAME\n", path);
+        return -1;
+    }
+    if (!m->hash || !m->prefix) {
+        fprintf(stderr, "Error: módulo %s no exporta module_hash y/o module_prefix\n", path);
+        return -1;
+    }
+    // Sin techo propio: el tamaño lo decide el módulo y el ingestor dimensiona
+    // su buffer con él. El único límite real es el de clave de LMDB, que se
+    // comprueba en ingestor_run cuando el entorno ya está abierto.
+    if (m->hash_len <= 0) {
+        fprintf(stderr, "Error: módulo %s declara MODULE_HASH_LEN=%d, debe ser positivo\n",
+                path, m->hash_len);
+        return -1;
+    }
+    if (m->prefix_bytes < 1 || m->prefix_bytes > 2) {
+        fprintf(stderr, "Error: módulo %s declara MODULE_PREFIX_BYTES=%d, debe ser 1 o 2\n",
+                path, m->prefix_bytes);
+        return -1;
+    }
+    if (m->prefix_bytes > m->hash_len) {
+        fprintf(stderr, "Error: módulo %s declara MODULE_PREFIX_BYTES=%d sobre un hash de %d bytes\n",
+                path, m->prefix_bytes, m->hash_len);
+        return -1;
+    }
+    if (m->max_dbs <= 0 || m->max_dbs > (1 << (8 * m->prefix_bytes))) {
+        fprintf(stderr, "Error: módulo %s declara MODULE_MAX_DBS=%d, fuera del rango 1..%d "
+                        "para MODULE_PREFIX_BYTES=%d\n",
+                path, m->max_dbs, 1 << (8 * m->prefix_bytes), m->prefix_bytes);
+        return -1;
+    }
+    return 0;
+}
+
 int loader_load(const char* path, loaded_module_t* out_module) {
     void* handle = dlopen(path, RTLD_NOW);
     if (!handle) return -1;
+
+    memset(out_module, 0, sizeof(*out_module));
     out_module->handle = handle;
-    out_module->name = *(const char**)dlsym(handle, "MODULE_NAME");
-    const int* hash_len_ptr = dlsym(handle, "MODULE_HASH_LEN");
-    out_module->hash_len = hash_len_ptr ? *hash_len_ptr : 0;
-    const int* max_dbs_ptr = dlsym(handle, "MODULE_MAX_DBS");
-    out_module->max_dbs = max_dbs_ptr ? *max_dbs_ptr : 0;
-    out_module->hash = dlsym(handle, "module_hash");
-    out_module->prefix = dlsym(handle, "module_prefix");
-    if (!out_module->name || !out_module->hash || !out_module->prefix || out_module->hash_len == 0 || out_module->max_dbs == 0) {
+
+    const char** name_ptr = (const char**)dlsym(handle, "MODULE_NAME");
+    out_module->name = name_ptr ? *name_ptr : NULL;
+    out_module->hash_len     = sym_int(handle, "MODULE_HASH_LEN");
+    out_module->prefix_bytes = sym_int(handle, "MODULE_PREFIX_BYTES");
+    out_module->max_dbs      = sym_int(handle, "MODULE_MAX_DBS");
+    out_module->hash   = (int (*)(const void*, size_t, void*, size_t))dlsym(handle, "module_hash");
+    out_module->prefix = (int (*)(const void*, size_t, char*, size_t))dlsym(handle, "module_prefix");
+
+    if (validate(path, out_module) != 0) {
         dlclose(handle);
+        memset(out_module, 0, sizeof(*out_module));
         return -1;
     }
     return 0;

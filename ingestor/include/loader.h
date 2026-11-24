@@ -10,13 +10,18 @@
 typedef struct {
     void* handle; // handle de dlopen
     const char* name;
-    int hash_len;
-    int max_dbs;
+    int hash_len;     // garantizado > 0 tras loader_load()
+    int prefix_bytes; // garantizado en 1..2 y <= hash_len tras loader_load()
+    int max_dbs;      // garantizado en 1..256^prefix_bytes tras loader_load()
     int (*hash)(const void*, size_t, void*, size_t);
     int (*prefix)(const void*, size_t, char*, size_t);
 } loaded_module_t;
 
-// Carga un módulo dinámico (.so) y valida su interfaz
+// Carga un módulo dinámico (.so) y valida su interfaz una sola vez, para que
+// los consumidores no tengan que comprobar nada en sus bucles calientes.
+// El techo de hash_len no se valida aquí porque depende de LMDB: lo comprueba
+// ingestor_run con el entorno ya abierto.
+// Imprime en stderr el motivo si la interfaz es inválida.
 // Retorna 0 en éxito, !=0 en error
 int loader_load(const char* path, loaded_module_t* out_module);
 

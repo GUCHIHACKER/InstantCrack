@@ -12,7 +12,26 @@ typedef struct lmdb_ctx lmdb_ctx_t;
 // max_dbs indica el número máximo de bases de datos nombradas (tablas/prefijos).
 lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs);
 
-// Inserta un par hash→plaintext en una tabla (sub-database) específica
+// Tamaño máximo de clave que admite esta compilación de LMDB (511 bytes por
+// defecto). Es el único techo real para la longitud del hash de un módulo.
+// Retorna el tamaño en bytes, o <0 en error
+int lmdb_max_key_size(lmdb_ctx_t* ctx);
+
+// Abre (creándola si no existe) una tabla/sub-database y devuelve su handle.
+// Los handles MDB_dbi sobreviven a lmdb_commit(): una llamada por tabla, nunca
+// por inserción. mdb_dbi_open() escanea linealmente las sub-DB abiertas, así
+// que en el bucle caliente cuesta hasta max_dbs strncmp por palabra.
+// Si una transacción se aborta, sus handles quedan invalidados.
+// Retorna 0 en éxito, !=0 en error
+int lmdb_open_dbi(lmdb_ctx_t* ctx, const char* table_name, MDB_dbi* out_dbi);
+
+// Inserta un par hash→plaintext en una tabla ya abierta (camino caliente).
+// Retorna 0 en éxito, MDB_KEYEXIST si la clave ya estaba, otro !=0 en error
+int lmdb_put_dbi(lmdb_ctx_t* ctx, MDB_dbi dbi, const void* hash, size_t hash_len,
+                 const void* plaintext, size_t plaintext_len);
+
+// Inserta resolviendo la tabla por nombre. Cómoda pero lenta; para ingestas
+// masivas usa lmdb_open_dbi() una vez y luego lmdb_put_dbi().
 // ctx: contexto LMDB
 // table_name: nombre de la tabla/sub-db (ej: "md5_a7")
 // hash: buffer del hash
@@ -20,9 +39,12 @@ lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs);
 // plaintext: buffer del plaintext
 // plaintext_len: longitud del plaintext
 // Retorna 0 en éxito, !=0 en error
-int lmdb_put(lmdb_ctx_t* ctx, const char* table_name, const void* hash, size_t hash_len, const void* plaintext, size_t plaintext_len);
+int lmdb_put(lmdb_ctx_t* ctx, const char* table_name, const void* hash, size_t hash_len,
+             const void* plaintext, size_t plaintext_len);
 
-// Hace commit de las inserciones pendientes (batch)
+// Hace commit del batch y abre la transacción siguiente. Si falla, los MDB_dbi
+// previos dejan de ser válidos y el llamante debe abortar.
+// Retorna 0 en éxito, !=0 en error
 int lmdb_commit(lmdb_ctx_t* ctx);
 
 // Cierra y libera el contexto LMDB

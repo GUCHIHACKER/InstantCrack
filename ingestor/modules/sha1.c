@@ -5,6 +5,7 @@
 
 const char* MODULE_NAME = "sha1";
 const int MODULE_HASH_LEN = 20;
+const int MODULE_PREFIX_BYTES = 1; // el prefijo usa sólo hash[0] -> 256 tablas
 const int MODULE_MAX_DBS = 256;
 
 int module_hash(const void* input, size_t input_len, void* output, size_t output_len) {
