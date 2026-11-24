@@ -12,7 +12,8 @@ struct lmdb_ctx {
     MDB_env* env;
     MDB_txn* txn;
     size_t mapsize;
-    size_t batch_bytes; // datos insertados desde el último commit
+    size_t batch_bytes;   // datos insertados desde el último commit
+    size_t min_headroom;  // margen mínimo, estimado de un batch
     char path[512];
 };
 
@@ -23,6 +24,8 @@ struct lmdb_ctx {
 // B-tree y las páginas de copia en escritura.
 #define LMDB_HEADROOM_FACTOR 4
 #define LMDB_MIN_HEADROOM (16u * 1024 * 1024)
+
+static int lmdb_maybe_grow(lmdb_ctx_t* ctx);
 
 // Helper para crear directorios recursivamente (mkdir -p)
 static int recursive_mkdir(const char *dir) {
@@ -51,12 +54,14 @@ static int recursive_mkdir(const char *dir) {
 // obligar a reconstruir.
 #define LMDB_BULK_FLAGS (MDB_WRITEMAP | MDB_NOMETASYNC)
 
-lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb) {
+lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb,
+                      size_t batch_bytes_hint) {
     lmdb_ctx_t* ctx = calloc(1, sizeof(lmdb_ctx_t));
     if (!ctx) return NULL;
 
     if (map_size_mb == 0) map_size_mb = LMDB_DEFAULT_MAP_MB;
     ctx->mapsize = map_size_mb * 1024 * 1024;
+    ctx->min_headroom = batch_bytes_hint * LMDB_HEADROOM_FACTOR;
 
     // La ruta va luego a mkdir y mdb_env_open, así que tiene que quedar
     // terminada en NUL aunque db_path llene el buffer.
@@ -76,6 +81,16 @@ lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb) {
     if (mdb_env_set_maxdbs(ctx->env, max_dbs) != 0) goto fail;
     if (mdb_env_set_mapsize(ctx->env, ctx->mapsize) != 0) goto fail;
     if (mdb_env_open(ctx->env, ctx->path, LMDB_BULK_FLAGS, 0664) != 0) goto fail;
+
+    // Si la base ya existía, LMDB sube el mapa hasta lo que ocupan los datos,
+    // así que el tamaño de verdad se lee del entorno.
+    MDB_envinfo info;
+    if (mdb_env_info(ctx->env, &info) == 0 && info.me_mapsize > ctx->mapsize)
+        ctx->mapsize = info.me_mapsize;
+
+    // Margen antes de la primera inserción: al reabrir una base llena el mapa
+    // queda justo en lo ocupado y el primer batch lo desbordaría.
+    if (lmdb_maybe_grow(ctx) != 0) goto fail;
 
     // Iniciar primera transacción
     if (mdb_txn_begin(ctx->env, NULL, 0, &ctx->txn) != 0) goto fail;
@@ -102,6 +117,7 @@ static int lmdb_maybe_grow(lmdb_ctx_t* ctx) {
     // El margen se mide contra el último batch porque el mapa solo se puede
     // ampliar en el commit: tiene que quedar sitio para otro batch entero.
     size_t needed = ctx->batch_bytes * LMDB_HEADROOM_FACTOR;
+    if (needed < ctx->min_headroom) needed = ctx->min_headroom;
     if (needed < LMDB_MIN_HEADROOM) needed = LMDB_MIN_HEADROOM;
 
     size_t target = ctx->mapsize;

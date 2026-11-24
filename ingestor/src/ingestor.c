@@ -116,7 +116,11 @@ int ingestor_run(const ingestor_config_t* config) {
         db_path = default_db_path;
     }
 
-    lmdb_ctx = lmdb_init(db_path, module.max_dbs, config->map_size_mb);
+    // Estimación de los datos de un batch, para que LMDB tenga margen desde la
+    // primera inserción. 32 bytes cubren el plaintext medio de una wordlist.
+    size_t batch_hint = (size_t)batch_size * (hash_len + 32);
+
+    lmdb_ctx = lmdb_init(db_path, module.max_dbs, config->map_size_mb, batch_hint);
     if (!lmdb_ctx) {
         fprintf(stderr, "Error: no se pudo inicializar LMDB en %s\n", db_path);
         goto cleanup;

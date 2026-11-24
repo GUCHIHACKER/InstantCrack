@@ -13,7 +13,11 @@ typedef struct lmdb_ctx lmdb_ctx_t;
 // map_size_mb es el tamaño INICIAL del mapa, no un techo: lmdb_commit() lo
 // amplía solo. 0 usa el valor por defecto. No conviene pasarse: con WRITEMAP
 // data.mdb aparenta el tamaño del mapa, aunque sea disperso.
-lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb);
+// batch_bytes_hint estima los datos de un batch y sirve para dejar margen antes
+// de la primera inserción, que es lo que hace falta al reabrir una base ya
+// llena: LMDB sube el mapa al tamaño ocupado y se queda sin hueco.
+lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb,
+                      size_t batch_bytes_hint);
 
 // Clave máxima que admite esta compilación de LMDB (511 por defecto): el único
 // techo real para la longitud del hash de un módulo.
