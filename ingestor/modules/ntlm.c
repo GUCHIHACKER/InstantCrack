@@ -9,7 +9,6 @@
 
 const char* MODULE_NAME = "ntlm";
 const int MODULE_HASH_LEN = 16;
-const int MODULE_PREFIX_BYTES = 1; // el prefijo usa sólo hash[0] -> 256 tablas
 const int MODULE_MAX_DBS = 256;
 
 // NTLM requiere que la contraseña se convierta a UTF-16LE antes de aplicar MD4

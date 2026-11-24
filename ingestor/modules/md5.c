@@ -8,7 +8,6 @@
 // Nombre del algoritmo (debe coincidir con el nombre del módulo y la carpeta de la DB)
 const char* MODULE_NAME = "md5";
 const int MODULE_HASH_LEN = 16;
-const int MODULE_PREFIX_BYTES = 1; // el prefijo usa sólo hash[0] -> 256 tablas
 const int MODULE_MAX_DBS = 256;
 
 // Calcula el hash MD5 de un buffer de entrada

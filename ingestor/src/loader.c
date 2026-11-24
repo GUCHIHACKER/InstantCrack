@@ -28,20 +28,9 @@ static int validate(const char* path, const loaded_module_t* m) {
                 path, m->hash_len);
         return -1;
     }
-    if (m->prefix_bytes < 1 || m->prefix_bytes > 2) {
-        fprintf(stderr, "Error: módulo %s declara MODULE_PREFIX_BYTES=%d, debe ser 1 o 2\n",
-                path, m->prefix_bytes);
-        return -1;
-    }
-    if (m->prefix_bytes > m->hash_len) {
-        fprintf(stderr, "Error: módulo %s declara MODULE_PREFIX_BYTES=%d sobre un hash de %d bytes\n",
-                path, m->prefix_bytes, m->hash_len);
-        return -1;
-    }
-    if (m->max_dbs <= 0 || m->max_dbs > (1 << (8 * m->prefix_bytes))) {
-        fprintf(stderr, "Error: módulo %s declara MODULE_MAX_DBS=%d, fuera del rango 1..%d "
-                        "para MODULE_PREFIX_BYTES=%d\n",
-                path, m->max_dbs, 1 << (8 * m->prefix_bytes), m->prefix_bytes);
+    if (m->max_dbs <= 0) {
+        fprintf(stderr, "Error: módulo %s declara MODULE_MAX_DBS=%d, debe ser positivo\n",
+                path, m->max_dbs);
         return -1;
     }
     return 0;
@@ -56,9 +45,8 @@ int loader_load(const char* path, loaded_module_t* out_module) {
 
     const char** name_ptr = (const char**)dlsym(handle, "MODULE_NAME");
     out_module->name = name_ptr ? *name_ptr : NULL;
-    out_module->hash_len     = sym_int(handle, "MODULE_HASH_LEN");
-    out_module->prefix_bytes = sym_int(handle, "MODULE_PREFIX_BYTES");
-    out_module->max_dbs      = sym_int(handle, "MODULE_MAX_DBS");
+    out_module->hash_len = sym_int(handle, "MODULE_HASH_LEN");
+    out_module->max_dbs  = sym_int(handle, "MODULE_MAX_DBS");
     out_module->hash   = (int (*)(const void*, size_t, void*, size_t))dlsym(handle, "module_hash");
     out_module->prefix = (int (*)(const void*, size_t, char*, size_t))dlsym(handle, "module_prefix");
 

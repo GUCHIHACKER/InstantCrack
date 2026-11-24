@@ -13,11 +13,8 @@ extern const char* MODULE_NAME;
 // arranque y no tiene cableado.
 extern const int MODULE_HASH_LEN;
 
-// Bytes iniciales del hash de los que depende module_prefix(). 1 o 2.
-// El ingestor los usa como índice de su caché de tablas.
-extern const int MODULE_PREFIX_BYTES;
-
-// Número máximo de tablas. No puede superar 256^MODULE_PREFIX_BYTES.
+// Número máximo de tablas, es decir, de prefijos distintos que module_prefix()
+// puede llegar a devolver.
 extern const int MODULE_MAX_DBS;
 
 // Calcula el hash de un plaintext
@@ -36,7 +33,10 @@ int module_hash(const void* input, size_t input_len, void* output, size_t output
 // hash_len: longitud del hash
 // prefix: buffer de salida para el prefijo (ej: 3 bytes para "5f")
 // prefix_len: longitud máxima del prefijo
-// Sólo puede depender de los primeros MODULE_PREFIX_BYTES bytes del hash.
+// Puede derivarse de cualquier parte del hash, no sólo de los primeros bytes:
+// el ingestor la llama por cada palabra y nunca supone de dónde sale. Debe ser
+// una función pura del hash, dejar prefix terminado en NUL y no devolver más de
+// MODULE_MAX_DBS prefijos distintos.
 // Retorna 0 en éxito, !=0 en error
 int module_prefix(const void* hash, size_t hash_len, char* prefix, size_t prefix_len);
 

@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <errno.h>
 #include <unistd.h>
 #include <lmdb.h>
@@ -16,6 +17,9 @@
 // por palabra, para no cargar el bucle caliente.
 #define HASH_GUARD 16
 #define HASH_GUARD_BYTE 0xA5
+
+// Tamaño del buffer de prefijo que se le pasa al módulo.
+#define PREFIX_MAX 16
 
 static int hash_guard_intact(const unsigned char* hash, size_t hash_len) {
     for (size_t i = 0; i < HASH_GUARD; i++)
@@ -34,14 +38,62 @@ static void hash_guard_fail(const char* module_name, size_t hash_len) {
     _exit(2);
 }
 
+// Caché de tablas indexada por la cadena del prefijo.
+// No se indexa por bytes del hash a propósito: module_prefix() puede derivar el
+// prefijo de cualquier parte del hash, así que el ingestor no supone nada sobre
+// su origen. Lo que se evita por palabra es el snprintf del nombre de tabla y el
+// escaneo lineal de mdb_dbi_open, que eran lo caro.
+typedef struct {
+    char    prefix[PREFIX_MAX];
+    MDB_dbi dbi;
+    int     used;
+} dbi_slot_t;
+
+typedef struct {
+    dbi_slot_t* slots;
+    size_t      mask;  // capacidad - 1; la capacidad es potencia de dos
+    size_t      count;
+} dbi_cache_t;
+
+static inline uint32_t fnv1a(const char* s) {
+    uint32_t h = 2166136261u;
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+// Devuelve el slot del prefijo: ocupado si ya estaba, libre si toca insertarlo.
+// NULL sólo si la tabla está llena, que con factor de carga 0.5 no puede pasar
+// antes de que LMDB se queje por max_dbs.
+static dbi_slot_t* dbi_cache_slot(dbi_cache_t* c, const char* prefix) {
+    size_t i = fnv1a(prefix) & c->mask;
+    for (size_t probes = 0; probes <= c->mask; probes++) {
+        dbi_slot_t* s = &c->slots[i];
+        if (!s->used || strcmp(s->prefix, prefix) == 0) return s;
+        i = (i + 1) & c->mask;
+    }
+    return NULL;
+}
+
+static int dbi_cache_init(dbi_cache_t* c, int max_dbs) {
+    size_t cap = 1;
+    while (cap < (size_t)max_dbs * 2) cap <<= 1;  // factor de carga <= 0.5
+    c->slots = calloc(cap, sizeof(*c->slots));
+    if (!c->slots) return -1;
+    c->mask = cap - 1;
+    c->count = 0;
+    return 0;
+}
+
 int ingestor_run(const ingestor_config_t* config) {
     int rc = -1;
     loaded_module_t module;
     wordlist_ctx_t* wl = NULL;
     lmdb_ctx_t* lmdb_ctx = NULL;
     unsigned char* hash = NULL;
-    MDB_dbi* dbi = NULL;      // caché de handles, indexada por los bytes de prefijo
-    unsigned char* dbi_ok = NULL;
+    dbi_cache_t cache = {0};
 
     if (loader_load(config->module_path, &module) != 0) {
         // loader_load ya detalló el motivo si la interfaz era inválida;
@@ -53,8 +105,6 @@ int ingestor_run(const ingestor_config_t* config) {
 
     // Validados en loader_load, así que el bucle caliente no comprueba nada.
     const size_t hash_len = (size_t)module.hash_len;
-    const int prefix_bytes = module.prefix_bytes;
-    const unsigned n_tables = 1u << (8 * prefix_bytes);
 
     wl = wordlist_open(config->wordlist_path);
     if (!wl) {
@@ -99,13 +149,8 @@ int ingestor_run(const ingestor_config_t* config) {
     }
     memset(hash + hash_len, HASH_GUARD_BYTE, HASH_GUARD);
 
-    // Caché de tablas: cada una se abre una vez, así el bucle caliente se
-    // ahorra por palabra el snprintf del nombre, la llamada indirecta a
-    // module.prefix y el escaneo de mdb_dbi_open.
-    dbi = malloc((size_t)n_tables * sizeof(*dbi));
-    dbi_ok = calloc(n_tables, 1);
-    if (!dbi || !dbi_ok) {
-        fprintf(stderr, "Error: sin memoria para la caché de %u tablas\n", n_tables);
+    if (dbi_cache_init(&cache, module.max_dbs) != 0) {
+        fprintf(stderr, "Error: sin memoria para la caché de %d tablas\n", module.max_dbs);
         goto cleanup;
     }
 
@@ -124,19 +169,32 @@ int ingestor_run(const ingestor_config_t* config) {
             continue;
         }
 
-        // Por contrato el prefijo sólo depende de estos bytes, así que valen
-        // como índice directo.
-        unsigned idx = prefix_bytes == 1 ? hash[0]
-                                         : ((unsigned)hash[0] << 8) | hash[1];
+        // Generar prefijo. Hay que llamar al módulo por cada palabra: es el
+        // único que sabe de qué parte del hash sale.
+        char prefix[PREFIX_MAX];
+        if (module.prefix(hash, hash_len, prefix, sizeof(prefix)) != 0) {
+            fprintf(stderr, "[!] Error al generar prefijo para: %s\n", line);
+            total_errors++;
+            continue;
+        }
+        // Garantizar el terminador aunque el módulo se olvide, para que fnv1a y
+        // strcmp no se salgan del buffer.
+        prefix[sizeof(prefix) - 1] = '\0';
+
+        dbi_slot_t* slot = dbi_cache_slot(&cache, prefix);
+        if (!slot) {
+            fprintf(stderr, "Error: caché de tablas llena; el módulo %s genera más prefijos de los que declara en MODULE_MAX_DBS (%d)\n",
+                    module.name, module.max_dbs);
+            goto cleanup;
+        }
 
         // Primera palabra de esta tabla: resolver el handle. Como máximo
-        // n_tables veces en toda la ejecución.
-        if (__builtin_expect(!dbi_ok[idx], 0)) {
-            char prefix[16];
-            if (module.prefix(hash, hash_len, prefix, sizeof(prefix)) != 0) {
-                fprintf(stderr, "[!] Error al generar prefijo para: %s\n", line);
-                total_errors++;
-                continue;
+        // max_dbs veces en toda la ejecución.
+        if (__builtin_expect(!slot->used, 0)) {
+            if (cache.count >= (size_t)module.max_dbs) {
+                fprintf(stderr, "Error: el módulo %s ha generado más de %d prefijos distintos (prefijo '%s')\n",
+                        module.name, module.max_dbs, prefix);
+                goto cleanup;
             }
 
             // Construir nombre de tabla: <algo>_<prefix>
@@ -144,19 +202,21 @@ int ingestor_run(const ingestor_config_t* config) {
             int n = snprintf(table_name, sizeof(table_name), "%s_%s", module.name, prefix);
             if (n < 0 || (size_t)n >= sizeof(table_name)) {
                 // Truncar haría que dos prefijos compartiesen tabla.
-                fprintf(stderr, "Error: nombre de tabla demasiado largo para el módulo %s\n", module.name);
+                fprintf(stderr, "Error: nombre de tabla demasiado largo: %s_%s\n", module.name, prefix);
                 goto cleanup;
             }
 
-            if (lmdb_open_dbi(lmdb_ctx, table_name, &dbi[idx]) != 0) {
+            if (lmdb_open_dbi(lmdb_ctx, table_name, &slot->dbi) != 0) {
                 fprintf(stderr, "Error: no se pudo abrir la tabla %s\n", table_name);
                 goto cleanup;
             }
-            dbi_ok[idx] = 1;
+            memcpy(slot->prefix, prefix, sizeof(slot->prefix));
+            slot->used = 1;
+            cache.count++;
         }
 
         // Insertar en LMDB usando la tabla específica
-        int put_rc = lmdb_put_dbi(lmdb_ctx, dbi[idx], hash, hash_len, line, (size_t)len);
+        int put_rc = lmdb_put_dbi(lmdb_ctx, slot->dbi, hash, hash_len, line, (size_t)len);
         if (put_rc == MDB_KEYEXIST) {
             total_dups++;
             continue;
@@ -181,13 +241,12 @@ int ingestor_run(const ingestor_config_t* config) {
     // Commit final
     if (!hash_guard_intact(hash, hash_len)) hash_guard_fail(module.name, hash_len);
     if (lmdb_commit(lmdb_ctx) != 0) goto cleanup;
-    fprintf(stderr, "[=] Finalizado: %zu líneas procesadas, %zu hashes insertados, %zu duplicados, %zu errores\n",
-            total_lines, total_inserted, total_dups, total_errors);
+    fprintf(stderr, "[=] Finalizado: %zu líneas procesadas, %zu hashes insertados, %zu duplicados, %zu errores (%zu tablas)\n",
+            total_lines, total_inserted, total_dups, total_errors, cache.count);
     rc = 0;
 
 cleanup:
-    free(dbi_ok);
-    free(dbi);
+    free(cache.slots);
     free(hash);
     if (lmdb_ctx) lmdb_close(lmdb_ctx);
     if (wl) wordlist_close(wl);

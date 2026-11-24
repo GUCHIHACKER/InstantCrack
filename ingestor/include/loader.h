@@ -11,8 +11,7 @@ typedef struct {
     void* handle; // handle de dlopen
     const char* name;
     int hash_len;     // garantizado > 0 tras loader_load()
-    int prefix_bytes; // garantizado en 1..2 y <= hash_len tras loader_load()
-    int max_dbs;      // garantizado en 1..256^prefix_bytes tras loader_load()
+    int max_dbs;      // garantizado > 0 tras loader_load()
     int (*hash)(const void*, size_t, void*, size_t);
     int (*prefix)(const void*, size_t, char*, size_t);
 } loaded_module_t;
