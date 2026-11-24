@@ -12,9 +12,8 @@
 #include <unistd.h>
 #include <lmdb.h>
 
-// Bytes de guarda tras el buffer de hash. Son un tripwire para módulos que
-// ignoren output_len y escriban de más; se comprueban al cerrar cada batch y no
-// por palabra, para no cargar el bucle caliente.
+// Guarda tras el buffer de hash: tripwire para módulos que ignoren output_len.
+// Se comprueba al cerrar cada batch, no por palabra.
 #define HASH_GUARD 16
 #define HASH_GUARD_BYTE 0xA5
 
@@ -27,10 +26,8 @@ static int hash_guard_intact(const unsigned char* hash, size_t hash_len) {
     return 1;
 }
 
-// Si la guarda ha saltado, la memoria del proceso ya está corrupta: salimos sin
-// tocar el heap, porque un free() aquí aborta con "double free or corruption" y
-// entierra el diagnóstico. La DB queda en el último commit y LMDB suelta el
-// lock al morir el proceso.
+// Si la guarda saltó, la memoria ya está corrupta: salimos sin tocar el heap,
+// porque un free() aquí aborta con "double free" y entierra el diagnóstico.
 static void hash_guard_fail(const char* module_name, size_t hash_len) {
     fprintf(stderr, "Error: el módulo %s escribió más de los %zu bytes que declara "
                     "y corrompió memoria del ingestor; abortando\n", module_name, hash_len);
@@ -38,11 +35,9 @@ static void hash_guard_fail(const char* module_name, size_t hash_len) {
     _exit(2);
 }
 
-// Caché de tablas indexada por la cadena del prefijo.
-// No se indexa por bytes del hash a propósito: module_prefix() puede derivar el
-// prefijo de cualquier parte del hash, así que el ingestor no supone nada sobre
-// su origen. Lo que se evita por palabra es el snprintf del nombre de tabla y el
-// escaneo lineal de mdb_dbi_open, que eran lo caro.
+// Caché de tablas indexada por la cadena del prefijo, no por bytes del hash:
+// module_prefix() puede sacarlo de donde quiera. Lo que se ahorra por palabra es
+// el snprintf del nombre de tabla y el escaneo lineal de mdb_dbi_open.
 typedef struct {
     char    prefix[PREFIX_MAX];
     MDB_dbi dbi;
@@ -65,8 +60,7 @@ static inline uint32_t fnv1a(const char* s) {
 }
 
 // Devuelve el slot del prefijo: ocupado si ya estaba, libre si toca insertarlo.
-// NULL sólo si la tabla está llena, que con factor de carga 0.5 no puede pasar
-// antes de que LMDB se queje por max_dbs.
+// NULL sólo si la tabla está llena.
 static dbi_slot_t* dbi_cache_slot(dbi_cache_t* c, const char* prefix) {
     size_t i = fnv1a(prefix) & c->mask;
     for (size_t probes = 0; probes <= c->mask; probes++) {
@@ -112,8 +106,6 @@ int ingestor_run(const ingestor_config_t* config) {
         goto cleanup;
     }
 
-    // Buffers
-    char line[4096];
     int batch_size = config->batch_size > 0 ? config->batch_size : 500000;
     int batch_count = 0;
 
@@ -124,15 +116,14 @@ int ingestor_run(const ingestor_config_t* config) {
         db_path = default_db_path;
     }
 
-    lmdb_ctx = lmdb_init(db_path, module.max_dbs);
+    lmdb_ctx = lmdb_init(db_path, module.max_dbs, config->map_size_mb);
     if (!lmdb_ctx) {
         fprintf(stderr, "Error: no se pudo inicializar LMDB en %s\n", db_path);
         goto cleanup;
     }
 
-    // El hash va como clave, así que el único techo es el de LMDB. Se lo
-    // preguntamos en vez de cablear una constante: si recompilas LMDB con un
-    // MDB_MAXKEYSIZE mayor, el ingestor lo aprovecha sin tocar nada.
+    // El hash va como clave, así que el techo es el de LMDB. Se lo preguntamos
+    // en vez de cablearlo: si recompilas LMDB con más, se aprovecha solo.
     int max_key = lmdb_max_key_size(lmdb_ctx);
     if (max_key <= 0 || hash_len > (size_t)max_key) {
         fprintf(stderr, "Error: el módulo %s produce hashes de %zu bytes, pero LMDB admite claves de %d como máximo\n",
@@ -140,8 +131,8 @@ int ingestor_run(const ingestor_config_t* config) {
         goto cleanup;
     }
 
-    // Buffer dimensionado por el módulo: su tamaño ES hash_len, así que no puede
-    // desincronizarse de lo que el módulo declara.
+    // Buffer dimensionado por el módulo: su tamaño ES hash_len, así que no se
+    // puede desincronizar de lo declarado.
     hash = malloc(hash_len + HASH_GUARD);
     if (!hash) {
         fprintf(stderr, "Error: sin memoria para el buffer de hash\n");
@@ -156,28 +147,28 @@ int ingestor_run(const ingestor_config_t* config) {
 
     size_t total_lines = 0, total_inserted = 0, total_dups = 0, total_errors = 0;
 
-    while (1) {
-        ssize_t len = wordlist_next(wl, line, sizeof(line));
-        if (len < 0) break;
-        if (len == 0) continue;
+    // La línea apunta dentro del mapa de la wordlist: no se copia en ningún
+    // momento, ni para hashear ni para insertarla como valor.
+    size_t len;
+    const char* line;
+    while ((line = wordlist_next(wl, &len)) != NULL) {
         total_lines++;
 
         // Calcular hash
         if (module.hash(line, len, hash, hash_len) != 0) {
-            fprintf(stderr, "[!] Error al calcular hash para: %s\n", line);
+            fprintf(stderr, "[!] Error al calcular hash para: %.*s\n", (int)len, line);
             total_errors++;
             continue;
         }
 
-        // Generar prefijo. Hay que llamar al módulo por cada palabra: es el
-        // único que sabe de qué parte del hash sale.
+        // Por palabra: el módulo es el único que sabe de dónde sale el prefijo.
         char prefix[PREFIX_MAX];
         if (module.prefix(hash, hash_len, prefix, sizeof(prefix)) != 0) {
-            fprintf(stderr, "[!] Error al generar prefijo para: %s\n", line);
+            fprintf(stderr, "[!] Error al generar prefijo para: %.*s\n", (int)len, line);
             total_errors++;
             continue;
         }
-        // Garantizar el terminador aunque el módulo se olvide, para que fnv1a y
+        // Terminador garantizado aunque el módulo se olvide, para que fnv1a y
         // strcmp no se salgan del buffer.
         prefix[sizeof(prefix) - 1] = '\0';
 
@@ -216,10 +207,16 @@ int ingestor_run(const ingestor_config_t* config) {
         }
 
         // Insertar en LMDB usando la tabla específica
-        int put_rc = lmdb_put_dbi(lmdb_ctx, slot->dbi, hash, hash_len, line, (size_t)len);
+        int put_rc = lmdb_put_dbi(lmdb_ctx, slot->dbi, hash, hash_len, line, len);
         if (put_rc == MDB_KEYEXIST) {
             total_dups++;
             continue;
+        }
+        if (put_rc == MDB_MAP_FULL) {
+            // El mapa se amplía en los commits: llegar aquí significa que un
+            // solo batch agotó el margen.
+            fprintf(stderr, "Error: el mapa de LMDB se llenó dentro de un batch; reduce -b o arranca con un -s mayor\n");
+            goto cleanup;
         }
         if (put_rc != 0) {
             fprintf(stderr, "[!] Error al insertar en LMDB: %s\n", mdb_strerror(put_rc));

@@ -10,18 +10,19 @@ typedef struct lmdb_ctx lmdb_ctx_t;
 
 // Inicializa el entorno LMDB en la ruta dada.
 // max_dbs indica el número máximo de bases de datos nombradas (tablas/prefijos).
-lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs);
+// map_size_mb es el tamaño INICIAL del mapa, no un techo: lmdb_commit() lo
+// amplía solo. 0 usa el valor por defecto. No conviene pasarse: con WRITEMAP
+// data.mdb aparenta el tamaño del mapa, aunque sea disperso.
+lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb);
 
-// Tamaño máximo de clave que admite esta compilación de LMDB (511 bytes por
-// defecto). Es el único techo real para la longitud del hash de un módulo.
+// Clave máxima que admite esta compilación de LMDB (511 por defecto): el único
+// techo real para la longitud del hash de un módulo.
 // Retorna el tamaño en bytes, o <0 en error
 int lmdb_max_key_size(lmdb_ctx_t* ctx);
 
 // Abre (creándola si no existe) una tabla/sub-database y devuelve su handle.
-// Los handles MDB_dbi sobreviven a lmdb_commit(): una llamada por tabla, nunca
-// por inserción. mdb_dbi_open() escanea linealmente las sub-DB abiertas, así
-// que en el bucle caliente cuesta hasta max_dbs strncmp por palabra.
-// Si una transacción se aborta, sus handles quedan invalidados.
+// Los MDB_dbi sobreviven a lmdb_commit(): una llamada por tabla, nunca por
+// inserción, porque mdb_dbi_open() escanea linealmente las sub-DB abiertas.
 // Retorna 0 en éxito, !=0 en error
 int lmdb_open_dbi(lmdb_ctx_t* ctx, const char* table_name, MDB_dbi* out_dbi);
 

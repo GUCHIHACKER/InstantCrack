@@ -11,9 +11,11 @@ typedef struct wordlist_ctx wordlist_ctx_t;
 // Abre una wordlist para lectura
 wordlist_ctx_t* wordlist_open(const char* path);
 
-// Lee la siguiente línea (plaintext) de la wordlist
-// Retorna la longitud de la línea, o -1 si EOF
-ssize_t wordlist_next(wordlist_ctx_t* ctx, char* buffer, size_t max_len);
+// Devuelve la siguiente línea sin copiarla, y su longitud en *out_len.
+// El puntero NO está terminado en NUL y sólo vale hasta la siguiente llamada.
+// Se salta las líneas vacías y quita el \r de las wordlists con CRLF.
+// Retorna NULL al final.
+const char* wordlist_next(wordlist_ctx_t* ctx, size_t* out_len);
 
 // Cierra y libera la wordlist
 void wordlist_close(wordlist_ctx_t* ctx);

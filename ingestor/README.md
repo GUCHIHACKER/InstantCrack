@@ -39,13 +39,35 @@ cd modules && make clean && make
 ## Ejecución
 
 ```sh
-./ingestor -w <wordlist.txt> -m modules/<modulo>.so -d <ruta_db> [-b batch_size]
+./ingestor -w <wordlist.txt> -m modules/<modulo>.so -d <ruta_db> [-b batch_size] [-s mapa_mb]
 ```
 
 - `-w <wordlist>`: Ruta de la wordlist
 - `-m <modulo.so>`: Ruta del módulo `.so` (ej: `modules/md5.so`)
 - `-d <ruta_db>`: Ruta de la base de datos para el hash (ej: `../db/md5`). Si no existe, se crea; si existe, se abre. El usuario puede darle el nombre que quiera.
 - `-b <batch>`: Tamaño de batch (opcional, por defecto 500000)
+- `-s <mapa_mb>`: Tamaño **inicial** del mapa de LMDB en MB (opcional, por defecto 256)
+
+### Tamaño de la base de datos
+
+LMDB necesita fijar de antemano el tamaño del mapa de memoria, que actúa como
+techo del tamaño de la base. El ingestor **lo amplía solo**: al cerrar cada batch
+mira la ocupación y, si el margen libre no da para otro batch del mismo tamaño,
+duplica el mapa. Por eso no hay que acertar con `-s`: no es un límite, solo el
+punto de partida.
+
+```
+[+] Mapa de LMDB ampliado de 64 a 128 MB (50 MB en uso)
+```
+
+Un detalle a tener en cuenta: con `MDB_WRITEMAP`, LMDB hace `ftruncate` del
+fichero al tamaño del mapa, así que `data.mdb` **aparenta** ese tamaño aunque
+ocupe mucho menos. Es un fichero disperso:
+
+```sh
+ls -l db/md5/data.mdb   # 128 MB aparentes
+du -h  db/md5/data.mdb  # 52 MB reales
+```
 
 Ejemplo:
 

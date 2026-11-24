@@ -11,8 +11,18 @@
 struct lmdb_ctx {
     MDB_env* env;
     MDB_txn* txn;
+    size_t mapsize;
+    size_t batch_bytes; // datos insertados desde el último commit
     char path[512];
 };
+
+// Pequeño a propósito: ampliar cuesta un munmap/mmap, y un mapa inicial enorme
+// hace que data.mdb aparente ese tamaño desde el principio.
+#define LMDB_DEFAULT_MAP_MB 256
+// Margen libre a dejar, en múltiplos del último batch: cubre la sobrecarga del
+// B-tree y las páginas de copia en escritura.
+#define LMDB_HEADROOM_FACTOR 4
+#define LMDB_MIN_HEADROOM (16u * 1024 * 1024)
 
 // Helper para crear directorios recursivamente (mkdir -p)
 static int recursive_mkdir(const char *dir) {
@@ -35,19 +45,21 @@ static int recursive_mkdir(const char *dir) {
     return 0;
 }
 
-// Flags para carga masiva. WRITEMAP evita una copia por página escrita, a
-// cambio de perder la protección del SO frente a escrituras erróneas.
-// NOMETASYNC deja un fsync por transacción en vez de dos; mantiene la
-// integridad y un crash sólo deshace la última transacción.
-// Añadir MDB_NOSYNC acelera más, pero un crash puede obligar a reconstruir.
+// Carga masiva: WRITEMAP evita una copia por página escrita (a cambio de la
+// protección del SO frente a escrituras erróneas) y NOMETASYNC deja un fsync
+// por transacción en vez de dos. MDB_NOSYNC acelera más, pero un crash puede
+// obligar a reconstruir.
 #define LMDB_BULK_FLAGS (MDB_WRITEMAP | MDB_NOMETASYNC)
 
-lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs) {
+lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb) {
     lmdb_ctx_t* ctx = calloc(1, sizeof(lmdb_ctx_t));
     if (!ctx) return NULL;
 
-    // snprintf y no strncpy: strncpy no garantiza el terminador si db_path
-    // llena el buffer, y la ruta va luego a mkdir y mdb_env_open.
+    if (map_size_mb == 0) map_size_mb = LMDB_DEFAULT_MAP_MB;
+    ctx->mapsize = map_size_mb * 1024 * 1024;
+
+    // snprintf y no strncpy, que no garantiza el terminador si db_path llena el
+    // buffer, y la ruta va luego a mkdir y mdb_env_open.
     int n = snprintf(ctx->path, sizeof(ctx->path), "%s", db_path);
     if (n < 0 || (size_t)n >= sizeof(ctx->path)) {
         fprintf(stderr, "Error: ruta de DB demasiado larga (máximo %zu caracteres)\n",
@@ -62,7 +74,7 @@ lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs) {
 
     if (mdb_env_create(&ctx->env) != 0) goto fail;
     if (mdb_env_set_maxdbs(ctx->env, max_dbs) != 0) goto fail;
-    if (mdb_env_set_mapsize(ctx->env, 1ULL << 40) != 0) goto fail; // 1TB
+    if (mdb_env_set_mapsize(ctx->env, ctx->mapsize) != 0) goto fail;
     if (mdb_env_open(ctx->env, ctx->path, LMDB_BULK_FLAGS, 0664) != 0) goto fail;
 
     // Iniciar primera transacción
@@ -74,6 +86,39 @@ fail:
     if (ctx->env) mdb_env_close(ctx->env);
     free(ctx);
     return NULL;
+}
+
+// Amplía el mapa si hace falta. Sólo sin transacción activa: set_mapsize hace
+// munmap y vuelve a mapear, lo que invalida punteros a datos (los MDB_dbi son
+// enteros y sobreviven).
+static int lmdb_maybe_grow(lmdb_ctx_t* ctx) {
+    MDB_envinfo info;
+    MDB_stat st;
+    if (mdb_env_info(ctx->env, &info) != 0) return 0;
+    if (mdb_env_stat(ctx->env, &st) != 0) return 0;
+
+    size_t used = (size_t)(info.me_last_pgno + 1) * st.ms_psize;
+
+    // El margen se mide contra el último batch y no con un porcentaje fijo: si
+    // el batch es grande respecto al mapa, un umbral fijo se queda corto y el
+    // mapa se llena antes del siguiente commit, el único punto donde se amplía.
+    size_t needed = ctx->batch_bytes * LMDB_HEADROOM_FACTOR;
+    if (needed < LMDB_MIN_HEADROOM) needed = LMDB_MIN_HEADROOM;
+
+    size_t target = ctx->mapsize;
+    while (target <= used || target - used < needed) target *= 2;
+    if (target == ctx->mapsize) return 0;
+
+    int rc = mdb_env_set_mapsize(ctx->env, target);
+    if (rc != 0) {
+        fprintf(stderr, "Error: no se pudo ampliar el mapa a %zu MB: %s\n",
+                target / (1024 * 1024), mdb_strerror(rc));
+        return -1;
+    }
+    fprintf(stderr, "[+] Mapa de LMDB ampliado de %zu a %zu MB (%zu MB en uso)\n",
+            ctx->mapsize / (1024 * 1024), target / (1024 * 1024), used / (1024 * 1024));
+    ctx->mapsize = target;
+    return 0;
 }
 
 int lmdb_max_key_size(lmdb_ctx_t* ctx) {
@@ -93,7 +138,9 @@ int lmdb_put_dbi(lmdb_ctx_t* ctx, MDB_dbi dbi, const void* hash, size_t hash_len
     MDB_val val = { .mv_size = plaintext_len, .mv_data = (void*)plaintext };
     // NOOVERWRITE: si el hash ya está, devuelve MDB_KEYEXIST sin reescribir.
     // Hace la ingesta idempotente y ahorra escrituras en wordlists que solapan.
-    return mdb_put(ctx->txn, dbi, &key, &val, MDB_NOOVERWRITE);
+    int rc = mdb_put(ctx->txn, dbi, &key, &val, MDB_NOOVERWRITE);
+    if (rc == 0) ctx->batch_bytes += hash_len + plaintext_len;
+    return rc;
 }
 
 int lmdb_put(lmdb_ctx_t* ctx, const char* table_name, const void* hash, size_t hash_len, const void* plaintext, size_t plaintext_len) {
@@ -107,11 +154,15 @@ int lmdb_commit(lmdb_ctx_t* ctx) {
     int rc = mdb_txn_commit(ctx->txn);
     ctx->txn = NULL;
     if (rc != 0) {
-        // LMDB ya abortó la transacción y sus MDB_dbi quedan invalidados,
-        // así que no abrimos otra: el llamante debe abortar.
+        // LMDB ya abortó la transacción y sus MDB_dbi quedan inválidos, así que
+        // no abrimos otra: el llamante debe abortar.
         fprintf(stderr, "Error: fallo al confirmar la transacción: %s\n", mdb_strerror(rc));
         return rc;
     }
+    // Sin transacción activa: es el único momento en que se puede ampliar.
+    if (lmdb_maybe_grow(ctx) != 0) return -1;
+    ctx->batch_bytes = 0;
+
     // Iniciar nueva transacción para el siguiente batch
     if (mdb_txn_begin(ctx->env, NULL, 0, &ctx->txn) != 0) return -1;
     return 0;

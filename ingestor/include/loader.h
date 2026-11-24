@@ -16,11 +16,10 @@ typedef struct {
     int (*prefix)(const void*, size_t, char*, size_t);
 } loaded_module_t;
 
-// Carga un módulo dinámico (.so) y valida su interfaz una sola vez, para que
-// los consumidores no tengan que comprobar nada en sus bucles calientes.
-// El techo de hash_len no se valida aquí porque depende de LMDB: lo comprueba
-// ingestor_run con el entorno ya abierto.
-// Imprime en stderr el motivo si la interfaz es inválida.
+// Carga un módulo dinámico (.so) y valida su interfaz una vez, para que los
+// consumidores no comprueben nada en sus bucles calientes. El techo de hash_len
+// lo valida ingestor_run, porque depende de LMDB.
+// Imprime el motivo en stderr si la interfaz es inválida.
 // Retorna 0 en éxito, !=0 en error
 int loader_load(const char* path, loaded_module_t* out_module);
 

@@ -12,6 +12,9 @@ typedef struct {
     const char* module_path;
     int batch_size;
     const char* db_base_path;
+    // Tamaño inicial del mapa de LMDB en MB. 0 usa el valor por defecto.
+    // No es un techo: el ingestor lo amplía solo cuando hace falta.
+    size_t map_size_mb;
 } ingestor_config_t;
 
 // Inicializa y ejecuta el proceso principal del ingestor

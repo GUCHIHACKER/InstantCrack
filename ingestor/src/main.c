@@ -5,11 +5,13 @@
 #include <string.h>
 
 void print_usage(const char* prog) {
-    printf("Uso: %s -w <wordlist> -m <modulo.so> -d <ruta_db> [-b batch]\n", prog);
+    printf("Uso: %s -w <wordlist> -m <modulo.so> -d <ruta_db> [-b batch] [-s mapa_mb]\n", prog);
     printf("  -w <wordlist>      Ruta de la wordlist\n");
     printf("  -m <modulo.so>     Ruta del módulo .so\n");
     printf("  -d <ruta_db>       Ruta de la base de datos (ej: ../db/md5)\n");
     printf("  -b <batch>         Tamaño de batch (opcional, por defecto 500000)\n");
+    printf("  -s <mapa_mb>       Tamaño inicial del mapa LMDB en MB (por defecto 256).\n");
+    printf("                     No es un techo: se amplía solo cuando hace falta.\n");
 }
 
 int main(int argc, char** argv) {
@@ -22,6 +24,14 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-m") && i+1 < argc) config.module_path = argv[++i];
         else if (!strcmp(argv[i], "-b") && i+1 < argc) config.batch_size = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-d") && i+1 < argc) config.db_base_path = argv[++i];
+        else if (!strcmp(argv[i], "-s") && i+1 < argc) {
+            long mb = atol(argv[++i]);
+            if (mb <= 0) {
+                fprintf(stderr, "Error: -s debe ser un número de MB positivo\n");
+                return 1;
+            }
+            config.map_size_mb = (size_t)mb;
+        }
         else {
             print_usage(argv[0]);
             return 1;
