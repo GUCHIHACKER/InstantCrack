@@ -58,8 +58,8 @@ lmdb_ctx_t* lmdb_init(const char* db_path, int max_dbs, size_t map_size_mb) {
     if (map_size_mb == 0) map_size_mb = LMDB_DEFAULT_MAP_MB;
     ctx->mapsize = map_size_mb * 1024 * 1024;
 
-    // snprintf y no strncpy, que no garantiza el terminador si db_path llena el
-    // buffer, y la ruta va luego a mkdir y mdb_env_open.
+    // La ruta va luego a mkdir y mdb_env_open, así que tiene que quedar
+    // terminada en NUL aunque db_path llene el buffer.
     int n = snprintf(ctx->path, sizeof(ctx->path), "%s", db_path);
     if (n < 0 || (size_t)n >= sizeof(ctx->path)) {
         fprintf(stderr, "Error: ruta de DB demasiado larga (máximo %zu caracteres)\n",
@@ -99,9 +99,8 @@ static int lmdb_maybe_grow(lmdb_ctx_t* ctx) {
 
     size_t used = (size_t)(info.me_last_pgno + 1) * st.ms_psize;
 
-    // El margen se mide contra el último batch y no con un porcentaje fijo: si
-    // el batch es grande respecto al mapa, un umbral fijo se queda corto y el
-    // mapa se llena antes del siguiente commit, el único punto donde se amplía.
+    // El margen se mide contra el último batch porque el mapa solo se puede
+    // ampliar en el commit: tiene que quedar sitio para otro batch entero.
     size_t needed = ctx->batch_bytes * LMDB_HEADROOM_FACTOR;
     if (needed < LMDB_MIN_HEADROOM) needed = LMDB_MIN_HEADROOM;
 

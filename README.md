@@ -20,28 +20,30 @@ El sistema está optimizado para manejar archivos de datos masivos. A continuaci
 ```text
 # Ejemplo de almacenamiento para MD5 (Rockyou procesado)
 drwxrwxr-x .                               4.0 KB
-data.mdb                                    1.9 GB
+data.mdb                                    728 MB
 lock.mdb                                    8.0 KB
 
 # Ejemplo de almacenamiento para SHA1
 drwxrwxr-x .                               4.0 KB
-data.mdb                                    2.1 GB
+data.mdb                                    816 MB
 lock.mdb                                    8.0 KB
 
 # Ejemplo de almacenamiento para NTLM
 drwxrwxr-x .                               4.0 KB
-data.mdb                                    1.9 GB
+data.mdb                                    728 MB
 lock.mdb                                    8.0 KB
 ```
+
+*Nota: `data.mdb` es un fichero disperso, por lo que `ls -l` muestra el tamaño del mapa de LMDB y no el real. Estos son los tamaños que reporta `du`.*
 
 ### Rendimiento y Tiempos de Respuesta
 Bajo condiciones de carga normal, las consultas en diccionarios como Rockyou (procesado en LMDB) presentan los siguientes tiempos de respuesta totales (incluyendo la sobrecarga de red de la API):
 
-*   **MD5**: ~8ms (`0.008s total`)
-*   **SHA1**: ~27ms (`0.027s total`)
-*   **NTLM**: ~11ms (`0.011s total`)
+*   **MD5**: ~0.11ms (`0.00011s total`)
+*   **SHA1**: ~0.10ms (`0.00010s total`)
+*   **NTLM**: ~0.10ms (`0.00010s total`)
 
-*Nota: Estos tiempos representan la latencia completa de una petición HTTP local mediante `curl`.*
+*Nota: Estos tiempos representan la latencia completa de una petición HTTP local medida con `ab`, reutilizando la conexión. Con `curl` las cifras suben a milisegundos porque arrancar el proceso cuesta más que la consulta.*
 
 ---
 
@@ -114,7 +116,7 @@ python3 manage_algos.py add md5 ../db/md5 ../ingestor/modules/md5.so
 Inicie el servidor de la API para habilitar las consultas locales y remotas:
 
 ```bash
-cargo run
+cargo run --release
 ```
 *Nota: El comando `cargo run` se encarga de descargar las dependencias de Rust y compilar el binario automáticamente. Sin embargo, el sistema debe tener instaladas las bibliotecas de desarrollo (`libssl-dev`, etc.) mencionadas en la sección de requisitos.*
 

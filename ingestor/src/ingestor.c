@@ -35,9 +35,9 @@ static void hash_guard_fail(const char* module_name, size_t hash_len) {
     _exit(2);
 }
 
-// Caché de tablas indexada por la cadena del prefijo, no por bytes del hash:
-// module_prefix() puede sacarlo de donde quiera. Lo que se ahorra por palabra es
-// el snprintf del nombre de tabla y el escaneo lineal de mdb_dbi_open.
+// Caché de tablas indexada por la cadena del prefijo, que es lo único que el
+// ingestor conoce: module_prefix() puede derivarlo de cualquier parte del hash.
+// Ahorra por palabra el snprintf del nombre y el escaneo de mdb_dbi_open.
 typedef struct {
     char    prefix[PREFIX_MAX];
     MDB_dbi dbi;
@@ -90,8 +90,8 @@ int ingestor_run(const ingestor_config_t* config) {
     dbi_cache_t cache = {0};
 
     if (loader_load(config->module_path, &module) != 0) {
-        // loader_load ya detalló el motivo si la interfaz era inválida;
-        // dlerror() sólo dice algo si falló el dlopen.
+        // loader_load detalla los fallos de interfaz; dlerror() solo tiene algo
+        // que decir si lo que falló fue el dlopen.
         const char* err = dlerror();
         if (err) fprintf(stderr, "Error: no se pudo cargar el módulo %s: %s\n", config->module_path, err);
         return -1;
@@ -147,8 +147,8 @@ int ingestor_run(const ingestor_config_t* config) {
 
     size_t total_lines = 0, total_inserted = 0, total_dups = 0, total_errors = 0;
 
-    // La línea apunta dentro del mapa de la wordlist: no se copia en ningún
-    // momento, ni para hashear ni para insertarla como valor.
+    // La línea apunta dentro del mapa de la wordlist, y de ahí va directa al
+    // hash y a LMDB sin copiarse.
     size_t len;
     const char* line;
     while ((line = wordlist_next(wl, &len)) != NULL) {
@@ -213,8 +213,8 @@ int ingestor_run(const ingestor_config_t* config) {
             continue;
         }
         if (put_rc == MDB_MAP_FULL) {
-            // El mapa se amplía en los commits: llegar aquí significa que un
-            // solo batch agotó el margen.
+            // El mapa se amplía en los commits, así que esto solo pasa si un
+            // único batch agota el margen libre.
             fprintf(stderr, "Error: el mapa de LMDB se llenó dentro de un batch; reduce -b o arranca con un -s mayor\n");
             goto cleanup;
         }

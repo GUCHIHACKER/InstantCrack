@@ -20,9 +20,8 @@ static int validate(const char* path, const loaded_module_t* m) {
         fprintf(stderr, "Error: módulo %s no exporta module_hash y/o module_prefix\n", path);
         return -1;
     }
-    // Sin techo propio: el tamaño lo decide el módulo y el ingestor dimensiona
-    // su buffer con él. El único límite real es el de clave de LMDB, que se
-    // comprueba en ingestor_run cuando el entorno ya está abierto.
+    // El tamaño lo decide el módulo; el techo es el de clave de LMDB y lo
+    // comprueba ingestor_run, con el entorno ya abierto.
     if (m->hash_len <= 0) {
         fprintf(stderr, "Error: módulo %s declara MODULE_HASH_LEN=%d, debe ser positivo\n",
                 path, m->hash_len);

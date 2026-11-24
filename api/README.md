@@ -71,7 +71,9 @@ La API utiliza `api.db` (SQLite) para saber dónde están los datos. La tabla `a
 
 ## Funcionamiento Interno
 
-1. La API consulta en SQLite la ubicación del módulo `.so` y la base de datos LMDB para el algoritmo solicitado.
-2. Carga dinámicamente el módulo `.so` para detectar la longitud del hash y generar el prefijo necesario.
-3. Abre el entorno LMDB y la base de datos nombrada (tabla) correspondiente al prefijo (ej: `md5_5d`).
+1. Al arrancar, la API lee de SQLite la ubicación del módulo `.so` y la base LMDB de cada algoritmo registrado.
+2. Carga cada módulo `.so`, abre su entorno LMDB y abre los handles de todas sus tablas. Un algoritmo que falle se omite con un aviso y el resto sigue sirviendo.
+3. En cada consulta, pide al módulo el prefijo del hash y localiza la tabla correspondiente (ej: `md5_5d`) entre las ya abiertas.
 4. Realiza la búsqueda binaria del hash y retorna el plaintext si lo encuentra.
+
+Los algoritmos que se registren con `manage_algos.py` mientras la API está en marcha se cargan en la primera consulta, sin reiniciar el servicio.
